@@ -69,16 +69,20 @@ const ZoneUtilsUtil = preload("res://scripts/ZoneUtils.gd")
 @export var initial_skulls: int = 0
 @export var shotgun_unlock_cost: int = 10
 @export var machinegun_unlock_cost: int = 30
+@export var shotgun_charge_capacity: int = 10
+@export var machinegun_charge_capacity: int = 30
 @export var shield_cost: int = 20
 @export var turret_cost: int = 40
 
 @export_group("Flow")
 @export var debug_mode: bool = false
-@export var initial_spawn_interval: float = 7.0
-@export var second_spawn_interval: float = 6.0
-@export var final_spawn_interval: float = 5.0
-@export var first_spawn_stage_waves: int = 8
-@export var second_spawn_stage_waves: int = 10
+@export var initial_spawn_interval: float = 5.0
+@export var second_spawn_interval: float = 4.0
+@export var third_spawn_interval: float = 3.0
+@export var final_spawn_interval: float = 2.2
+@export var first_spawn_stage_waves: int = 4
+@export var second_spawn_stage_waves: int = 5
+@export var third_spawn_stage_waves: int = 7
 @export var parallax_strength: float = 0.045
 @export var background_2_parallax_margin: float = 1.08
 @export var enemy_click_radius: float = 104.0
@@ -118,10 +122,15 @@ var unlocked_weapons := {
 	&"shotgun": false,
 	&"machinegun": false
 }
+var weapon_charges := {
+	&"shotgun": 0,
+	&"machinegun": 0
+}
 var placement_mode: StringName = &""
 var initial_player_position: Vector2
 var initial_zaita_position: Vector2
 var initial_naita_position: Vector2
+var configured_distant_background_offset: Vector2
 var initial_parallax_position: Vector2
 var parallax_reference_position: Vector2
 var is_game_over_sequence: bool = false
@@ -136,6 +145,7 @@ var spawn_wave_index: int = 0
 
 func _ready() -> void:
 	randomize()
+	configured_distant_background_offset = distant_background.position
 	_fit_backgrounds()
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	initial_player_position = player.global_position
@@ -151,12 +161,16 @@ func _ready() -> void:
 	hud.item_requested.connect(_on_item_requested)
 	hud.shotgun_unlock_cost = shotgun_unlock_cost
 	hud.machinegun_unlock_cost = machinegun_unlock_cost
+	hud.shotgun_charge_capacity = shotgun_charge_capacity
+	hud.machinegun_charge_capacity = machinegun_charge_capacity
 	hud.shield_cost = shield_cost
 	hud.turret_cost = turret_cost
 
 	player.set_effects_root(effects)
 	player.set_spend_callback(Callable(self, "_try_spend_skulls"))
+	player.set_weapon_charges(weapon_charges, _weapon_charge_capacities())
 	player.connect("shot_fired", Callable(self, "_on_player_shot_fired"))
+	player.connect("weapon_charge_spent", Callable(self, "_on_player_weapon_charge_spent"))
 	zaita.hit.connect(_on_child_hit)
 	naita.hit.connect(_on_child_hit)
 	zaita.death_sequence_finished.connect(_on_child_death_sequence_finished)
@@ -214,6 +228,10 @@ func reset_state() -> void:
 		&"shotgun": false,
 		&"machinegun": false
 	}
+	weapon_charges = {
+		&"shotgun": 0,
+		&"machinegun": 0
+	}
 	placement_mode = &""
 	spawn_wave_index = 0
 
@@ -228,6 +246,7 @@ func reset_state() -> void:
 	naita.reset(initial_naita_position, children_walk_zone, safe_zone_polygon)
 	player.current_weapon = current_weapon
 	player.unlocked_weapons = unlocked_weapons.duplicate()
+	player.set_weapon_charges(weapon_charges, _weapon_charge_capacities())
 
 	distant_background.position = initial_parallax_position
 	hud.visible = false
@@ -327,7 +346,9 @@ func _current_spawn_count() -> int:
 		return 1
 	if spawn_wave_index < first_spawn_stage_waves + second_spawn_stage_waves:
 		return 2
-	return 3
+	if spawn_wave_index < first_spawn_stage_waves + second_spawn_stage_waves + third_spawn_stage_waves:
+		return 3
+	return 4
 
 
 func _current_spawn_interval() -> float:
@@ -335,6 +356,8 @@ func _current_spawn_interval() -> float:
 		return initial_spawn_interval
 	if spawn_wave_index < first_spawn_stage_waves + second_spawn_stage_waves:
 		return second_spawn_interval
+	if spawn_wave_index < first_spawn_stage_waves + second_spawn_stage_waves + third_spawn_stage_waves:
+		return third_spawn_interval
 	return final_spawn_interval
 
 
@@ -350,19 +373,20 @@ func _on_enemy_fired(
 	target: Node2D,
 	damage: int,
 	control_position: Vector2 = Vector2.INF,
-	width: float = 2.2
+	width: float = 2.2,
+	start_ratio: float = -1.0
 ) -> void:
 	if not is_game_active:
 		return
 
 	var protector := _protector_on_path(start_position, end_position)
 	if protector != null:
-		_spawn_ray(start_position, protector.global_position, Color(1.0, 0.82, 0.08, 1.0), width, control_position)
+		_spawn_ray(start_position, protector.global_position, Color(1.0, 0.82, 0.08, 1.0), width, control_position, start_ratio)
 		if protector.has_method("take_damage"):
 			protector.take_damage(damage)
 		return
 
-	_spawn_ray(start_position, end_position, Color(1.0, 0.82, 0.08, 1.0), width, control_position)
+	_spawn_ray(start_position, end_position, Color(1.0, 0.82, 0.08, 1.0), width, control_position, start_ratio)
 	if target != null and target.is_in_group("children"):
 		target.take_shot()
 	# The brother can be targeted, but the prototype never applies damage to him.
@@ -439,22 +463,38 @@ func _on_weapon_requested(weapon: StringName) -> void:
 	if weapon == &"pistol":
 		current_weapon = weapon
 	elif weapon == &"shotgun":
-		if not unlocked_weapons[&"shotgun"]:
+		if not unlocked_weapons[&"shotgun"] or int(weapon_charges.get(&"shotgun", 0)) <= 0:
 			if not _try_spend_skulls(shotgun_unlock_cost):
 				return
+			weapon_charges[&"shotgun"] = shotgun_charge_capacity
 			unlocked_weapons[&"shotgun"] = true
 		current_weapon = weapon
 	elif weapon == &"machinegun":
-		if not unlocked_weapons[&"machinegun"]:
+		if not unlocked_weapons[&"machinegun"] or int(weapon_charges.get(&"machinegun", 0)) <= 0:
 			if not _try_spend_skulls(machinegun_unlock_cost):
 				return
+			weapon_charges[&"machinegun"] = machinegun_charge_capacity
 			unlocked_weapons[&"machinegun"] = true
 		current_weapon = weapon
 
 	player.unlocked_weapons = unlocked_weapons.duplicate()
+	player.set_weapon_charges(weapon_charges, _weapon_charge_capacities())
 	player.select_weapon(current_weapon)
 	placement_mode = &""
 	hud.show_placement_mode(placement_mode)
+	_update_hud()
+
+
+func _on_player_weapon_charge_spent(weapon: StringName, amount: int, remaining: int, _capacity: int) -> void:
+	weapon_charges[weapon] = remaining
+	if remaining <= 0:
+		unlocked_weapons[weapon] = false
+		if current_weapon == weapon:
+			current_weapon = &"pistol"
+			player.call_deferred("select_weapon", &"pistol")
+	player.unlocked_weapons = unlocked_weapons.duplicate()
+	player.set_weapon_charges(weapon_charges, _weapon_charge_capacities())
+	hud.show_weapon_charge_delta(weapon, -amount)
 	_update_hud()
 
 
@@ -485,9 +525,16 @@ func _try_spend_skulls(amount: int) -> bool:
 func _update_hud() -> void:
 	if hud == null:
 		return
-	hud.update_display(black_skulls, current_weapon, unlocked_weapons)
+	hud.update_display(black_skulls, current_weapon, unlocked_weapons, weapon_charges)
 	hud.update_child_status("Zaíta", zaita.alive)
 	hud.update_child_status("Naíta", naita.alive)
+
+
+func _weapon_charge_capacities() -> Dictionary:
+	return {
+		&"shotgun": shotgun_charge_capacity,
+		&"machinegun": machinegun_charge_capacity
+	}
 
 
 func _enemy_at_point(point: Vector2) -> Node2D:
@@ -585,12 +632,12 @@ func _distance_point_to_segment(point: Vector2, a: Vector2, b: Vector2) -> float
 	return point.distance_to(projection)
 
 
-func _spawn_ray(start_position: Vector2, end_position: Vector2, color: Color, width: float, control_position: Vector2 = Vector2.INF) -> void:
+func _spawn_ray(start_position: Vector2, end_position: Vector2, color: Color, width: float, control_position: Vector2 = Vector2.INF, start_ratio: float = -1.0) -> void:
 	if ray_scene == null:
 		return
 	var ray := ray_scene.instantiate()
 	effects.add_child(ray)
-	ray.setup(start_position, end_position, color, width, control_position)
+	ray.setup(start_position, end_position, color, width, control_position, start_ratio)
 
 
 func _update_parallax() -> void:
@@ -619,7 +666,7 @@ func _fit_backgrounds() -> void:
 		map_size.y / distant_size.y
 	) * background_2_parallax_margin
 	distant_background.scale = Vector2.ONE * distant_scale
-	distant_background.position = (map_size - distant_size * distant_scale) * 0.5
+	distant_background.position = (map_size - distant_size * distant_scale) * 0.5 + configured_distant_background_offset
 	_configure_camera()
 
 

@@ -5,7 +5,7 @@ const SpriteSheetAnimatorUtil = preload("res://scripts/SpriteSheetAnimator.gd")
 const ZoneUtilsUtil = preload("res://scripts/ZoneUtils.gd")
 
 signal defeated(reward: int)
-signal fired(start_position: Vector2, end_position: Vector2, target: Node2D, damage: int, control_position: Vector2, width: float)
+signal fired(start_position: Vector2, end_position: Vector2, target: Node2D, damage: int, control_position: Vector2, width: float, start_ratio: float)
 
 enum WeaponType { PISTOL, MACHINEGUN }
 
@@ -16,7 +16,7 @@ enum WeaponType { PISTOL, MACHINEGUN }
 @export var start_run_distance: float = 46.0
 @export var run_distance_after_shots: float = 38.0
 @export var shots_before_run: int = 100
-@export var shots_before_zaita_hit: int = 42
+@export var shots_before_zaita_hit: int = 5
 @export var max_shots_per_second: float = 1.0
 @export var pistol_health: int = 1
 @export var machinegun_health: int = 2
@@ -27,41 +27,55 @@ enum WeaponType { PISTOL, MACHINEGUN }
 @export var can_shoot: bool = true
 @export var pistol_shots_per_second: float = 1.0 / 3.0
 @export var machinegun_shots_per_second: float = 1.0 / 5.0
+@export var pistol_idle_wait_seconds: float = 1.0
+@export var machinegun_idle_wait_seconds: float = 2.0
 @export var pistol_fire_frame: int = 18
 @export var machinegun_fire_frame: int = 18
-@export var running_animation_speed: float = 0.66
+@export var running_animation_speed: float = 1.05
+@export var shooting_animation_duration: float = 1.0
 @export var min_shooting_animation_speed: float = 0.35
-@export var max_shooting_animation_speed: float = 1.15
+@export var max_shooting_animation_speed: float = 3.0
 @export_group("Sprite sheet animation")
 @export var starting_texture: Texture2D = preload("res://assets/sprites/enemy-starting-back-right.png")
+@export var idle_texture: Texture2D = preload("res://assets/sprites/enemy-idle-back-right.png")
 @export var running_texture: Texture2D = preload("res://assets/sprites/enemy-running-back-right.png")
 @export var pistol_shooting_texture: Texture2D = preload("res://assets/sprites/enemy-shooting-pistol-back-right.png")
 @export var machinegun_shooting_texture: Texture2D = preload("res://assets/sprites/enemy-shooting-machinegun-back-right.png")
 @export var dying_texture: Texture2D = preload("res://assets/sprites/enemy-dying-back-right.png")
 @export_file("*.json") var starting_json: String = "res://assets/sprites/enemy-starting-back-right.json"
+@export_file("*.json") var idle_json: String = "res://assets/sprites/enemy-idle-back-right.json"
 @export_file("*.json") var running_json: String = "res://assets/sprites/enemy-running-back-right.json"
 @export_file("*.json") var pistol_shooting_json: String = "res://assets/sprites/enemy-shooting-pistol-back-right.json"
 @export_file("*.json") var machinegun_shooting_json: String = "res://assets/sprites/enemy-shooting-machinegun-back-right.json"
 @export_file("*.json") var dying_json: String = "res://assets/sprites/enemy-dying-back-right.json"
 @export var starting_frame_size: Vector2i = Vector2i(600, 640)
+@export var idle_frame_size: Vector2i = Vector2i(222, 536)
 @export var running_frame_size: Vector2i = Vector2i(286, 578)
 @export var pistol_shooting_frame_size: Vector2i = Vector2i(640, 534)
 @export var machinegun_shooting_frame_size: Vector2i = Vector2i(640, 586)
 @export var dying_frame_size: Vector2i = Vector2i(458, 586)
 @export var sheet_columns: int = 6
 @export var frame_count: int = 36
-@export var sprite_scale: float = 0.178
-@export var starting_sprite_scale: float = 0.205
-@export var pistol_shooting_sprite_scale: float = 0.181
-@export var machinegun_shooting_sprite_scale: float = 0.173
-@export var dying_sprite_scale: float = 0.178
+@export var sprite_scale: float = 0.195
+@export var starting_sprite_scale: float = 0.218
+@export var idle_sprite_scale: float = 0.2
+@export var pistol_shooting_sprite_scale: float = 0.2
+@export var machinegun_shooting_sprite_scale: float = 0.19
+@export var dying_sprite_scale: float = 0.195
+@export var idle_animation_speed: float = 0.72
 @export_group("Shot effects")
-@export var muzzle_right_offset: Vector2 = Vector2(34.0, -58.0)
-@export var muzzle_left_offset: Vector2 = Vector2(-34.0, -58.0)
+@export var pistol_muzzle_right_offset: Vector2 = Vector2(44.0, -80.0)
+@export var pistol_muzzle_left_offset: Vector2 = Vector2(-44.0, -80.0)
+@export var machinegun_muzzle_right_offset: Vector2 = Vector2(42.0, -82.0)
+@export var machinegun_muzzle_left_offset: Vector2 = Vector2(-42.0, -82.0)
 @export var muzzle_curve_distance: float = 54.0
 @export var muzzle_flash_duration: float = 0.045
 @export var pistol_ray_width: float = 2.0
 @export var machinegun_ray_width: float = 1.55
+@export var projectile_start_ratio: float = 0.76
+@export_group("Targeting")
+@export var red_zone_target_child_name: StringName = &"Zaita"
+@export var blue_zone_target_child_name: StringName = &"Naita"
 
 @onready var body_sprite: Sprite2D = $Sprites/BodySprite
 @onready var muzzle_flash: Polygon2D = $MuzzleFlash
@@ -92,6 +106,8 @@ var muzzle_flash_tween: Tween
 var has_finished_dying: bool = false
 var has_fired_this_animation_loop: bool = false
 var last_fired_frame_index: int = -1
+var is_waiting_for_next_shot: bool = false
+var shooting_wait_time: float = 0.0
 
 
 func _ready() -> void:
@@ -114,6 +130,8 @@ func _process(delta: float) -> void:
 		&"starting":
 			if _animate_once(delta):
 				_begin_run(start_run_distance)
+		&"idle":
+			_process_idle(delta)
 		&"running":
 			_process_running(delta)
 		&"shooting":
@@ -145,6 +163,8 @@ func configure(zone: Rect2, polygon: PackedVector2Array, new_type_index: int, sp
 	has_finished_dying = false
 	has_fired_this_animation_loop = false
 	last_fired_frame_index = -1
+	is_waiting_for_next_shot = false
+	shooting_wait_time = 0.0
 	modulate = Color(1.0, 1.0, 1.0, 0.0)
 	scale = Vector2.ONE
 	_enter_starting()
@@ -198,9 +218,30 @@ func _begin_run(distance: float) -> void:
 
 func _begin_shooting() -> void:
 	current_state = &"shooting"
+	_start_shooting_cycle()
+
+
+func _start_shooting_cycle() -> void:
+	current_state = &"shooting"
+	is_waiting_for_next_shot = false
+	shooting_wait_time = 0.0
 	has_fired_this_animation_loop = false
 	last_fired_frame_index = -1
 	_switch_animation(_shooting_animation())
+
+
+func _finish_shooting_cycle() -> void:
+	if current_state != &"shooting":
+		return
+
+	shooting_wait_time = _current_idle_wait_seconds()
+	is_waiting_for_next_shot = shooting_wait_time > 0.0
+	if not is_waiting_for_next_shot:
+		_start_shooting_cycle()
+		return
+
+	current_state = &"idle"
+	_switch_animation(&"idle")
 
 
 func _begin_dying() -> void:
@@ -230,7 +271,18 @@ func _process_running(delta: float) -> void:
 		_begin_shooting()
 
 
+func _process_idle(delta: float) -> void:
+	_animate_loop(delta, idle_animation_speed)
+	shooting_wait_time -= delta
+	if shooting_wait_time <= 0.0:
+		_start_shooting_cycle()
+
+
 func _process_shooting(delta: float) -> void:
+	if is_waiting_for_next_shot:
+		_process_idle(delta)
+		return
+
 	_animate_shooting(delta)
 
 
@@ -243,7 +295,7 @@ func _register_shot() -> void:
 
 	if shots_since_run >= shots_before_run:
 		shots_since_run = 0
-		current_shots_per_second = minf(current_shots_per_second * 2.0, max_shots_per_second)
+		current_shots_per_second = minf(base_shots_per_second, max_shots_per_second)
 		_begin_run(run_distance_after_shots)
 
 
@@ -259,16 +311,20 @@ func _emit_enemy_shot(can_hit_child: bool) -> void:
 
 
 func _fire_at_position(aim_position: Vector2, target: Node2D) -> void:
-	var start_position := _muzzle_world_position()
-	var control_position := _muzzle_control_point(aim_position)
-	_play_muzzle_flash(aim_position)
-	fired.emit(start_position, aim_position, target, shot_damage, control_position, _current_ray_width())
+	var muzzle_offset := _current_muzzle_offset()
+	var start_position := global_position + muzzle_offset
+	var control_position := _muzzle_control_point(aim_position, start_position)
+	_play_muzzle_flash(aim_position, muzzle_offset)
+	fired.emit(start_position, aim_position, target, shot_damage, control_position, _current_ray_width(), projectile_start_ratio)
 
 
 func _find_child_target() -> Node2D:
+	var preferred_target_name := blue_zone_target_child_name if is_mirrored else red_zone_target_child_name
 	var candidates: Array[Node2D] = []
 	for child in get_tree().get_nodes_in_group("children"):
 		if child is Node2D and child.get("alive") == true:
+			if child.name == preferred_target_name:
+				return child
 			candidates.append(child)
 	if candidates.is_empty():
 		return null
@@ -285,13 +341,19 @@ func _current_ray_width() -> float:
 	return pistol_ray_width
 
 
-func _muzzle_world_position() -> Vector2:
-	var muzzle_offset := muzzle_left_offset if is_mirrored else muzzle_right_offset
-	return global_position + muzzle_offset
+func _current_idle_wait_seconds() -> float:
+	if weapon_type == WeaponType.MACHINEGUN:
+		return machinegun_idle_wait_seconds
+	return pistol_idle_wait_seconds
 
 
-func _muzzle_control_point(aim_position: Vector2) -> Vector2:
-	var start_position := _muzzle_world_position()
+func _current_muzzle_offset() -> Vector2:
+	if weapon_type == WeaponType.MACHINEGUN:
+		return machinegun_muzzle_left_offset if is_mirrored else machinegun_muzzle_right_offset
+	return pistol_muzzle_left_offset if is_mirrored else pistol_muzzle_right_offset
+
+
+func _muzzle_control_point(aim_position: Vector2, start_position: Vector2) -> Vector2:
 	var weapon_direction := Vector2(-1.0 if is_mirrored else 1.0, -0.12).normalized()
 	var target_direction := (aim_position - start_position).normalized()
 	if target_direction.length() <= 0.01:
@@ -300,9 +362,8 @@ func _muzzle_control_point(aim_position: Vector2) -> Vector2:
 	return start_position + masked_direction * muzzle_curve_distance
 
 
-func _play_muzzle_flash(aim_position: Vector2) -> void:
-	var muzzle_offset := muzzle_left_offset if is_mirrored else muzzle_right_offset
-	var direction := aim_position - _muzzle_world_position()
+func _play_muzzle_flash(aim_position: Vector2, muzzle_offset: Vector2) -> void:
+	var direction := aim_position - (global_position + muzzle_offset)
 	if direction.length() <= 0.01:
 		direction = Vector2(-1.0 if is_mirrored else 1.0, -0.12)
 
@@ -441,8 +502,8 @@ func _animate_shooting(delta: float) -> void:
 
 		frame_time -= duration
 		if frame_index >= rects.size() - 1:
-			frame_index = 0
-			has_fired_this_animation_loop = false
+			_finish_shooting_cycle()
+			return
 		else:
 			frame_index += 1
 		_set_current_frame()
@@ -486,6 +547,7 @@ func _animate_once(delta: float) -> bool:
 func _prepare_animations() -> void:
 	animation_frames = {
 		&"starting": SpriteSheetAnimatorUtil.load_sheet(starting_json, starting_frame_size, sheet_columns, frame_count),
+		&"idle": SpriteSheetAnimatorUtil.load_sheet(idle_json, idle_frame_size, sheet_columns, frame_count),
 		&"running": SpriteSheetAnimatorUtil.load_sheet(running_json, running_frame_size, sheet_columns, frame_count),
 		&"shooting_pistol": SpriteSheetAnimatorUtil.load_sheet(pistol_shooting_json, pistol_shooting_frame_size, sheet_columns, frame_count),
 		&"shooting_machinegun": SpriteSheetAnimatorUtil.load_sheet(machinegun_shooting_json, machinegun_shooting_frame_size, sheet_columns, frame_count),
@@ -493,6 +555,7 @@ func _prepare_animations() -> void:
 	}
 	animation_textures = {
 		&"starting": starting_texture,
+		&"idle": idle_texture,
 		&"running": running_texture,
 		&"shooting_pistol": pistol_shooting_texture,
 		&"shooting_machinegun": machinegun_shooting_texture,
@@ -529,6 +592,8 @@ func _sprite_scale_for_animation(animation: StringName) -> float:
 	match animation:
 		&"starting":
 			return starting_sprite_scale
+		&"idle":
+			return idle_sprite_scale
 		&"shooting_pistol":
 			return pistol_shooting_sprite_scale
 		&"shooting_machinegun":
@@ -545,7 +610,7 @@ func _shooting_animation() -> StringName:
 
 func _shooting_animation_speed() -> float:
 	var loop_duration := _animation_duration(current_animation)
-	var desired_speed := loop_duration * maxf(0.1, current_shots_per_second)
+	var desired_speed := loop_duration / maxf(0.1, shooting_animation_duration)
 	return clampf(desired_speed, min_shooting_animation_speed, max_shooting_animation_speed)
 
 

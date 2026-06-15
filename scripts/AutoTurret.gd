@@ -132,7 +132,7 @@ func _spawn_ray(start_position: Vector2, end_position: Vector2, control_position
 	var parent := effects_root if effects_root != null else get_parent()
 	var ray := ray_scene.instantiate()
 	parent.add_child(ray)
-	ray.setup(start_position, end_position, Color(1.0, 0.86, 0.12, 1.0), 2.2, control_position)
+	ray.setup(start_position, end_position, Color(1.0, 0.86, 0.12, 1.0), 2.2, control_position, 0.04)
 
 
 func _muzzle_position() -> Vector2:

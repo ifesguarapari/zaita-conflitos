@@ -4,6 +4,7 @@ const SpriteSheetAnimatorUtil = preload("res://scripts/SpriteSheetAnimator.gd")
 const ZoneUtilsUtil = preload("res://scripts/ZoneUtils.gd")
 
 signal shot_fired(start_position: Vector2, end_position: Vector2)
+signal weapon_charge_spent(weapon: StringName, amount: int, remaining: int, capacity: int)
 
 const ORIENTATION_BACK_LEFT := 0
 const ORIENTATION_BACK_RIGHT := 1
@@ -26,6 +27,8 @@ const ORIENTATION_FRONT_LEFT := 3
 @export var shotgun_shot_cost: int = 0
 @export var machinegun_shot_cost: int = 0
 @export var shotgun_spread_radius: float = 72.0
+@export var shotgun_targets_per_shot: int = 2
+@export var machinegun_targets_per_shot: int = 3
 @export var ray_scene: PackedScene
 @export var boundary_retreat_distance: float = 58.0
 @export var boundary_probe_distance: float = 1800.0
@@ -99,6 +102,14 @@ var unlocked_weapons := {
 	&"pistol": true,
 	&"shotgun": false,
 	&"machinegun": false
+}
+var weapon_charges := {
+	&"shotgun": 0,
+	&"machinegun": 0
+}
+var weapon_charge_capacities := {
+	&"shotgun": 10,
+	&"machinegun": 30
 }
 var active: bool = false
 var target_position: Vector2
@@ -188,6 +199,11 @@ func set_spend_callback(callback: Callable) -> void:
 	try_spend_skulls = callback
 
 
+func set_weapon_charges(new_charges: Dictionary, new_capacities: Dictionary) -> void:
+	weapon_charges = new_charges.duplicate()
+	weapon_charge_capacities = new_capacities.duplicate()
+
+
 func reset(initial_position: Vector2, new_zone: Rect2, new_polygon: PackedVector2Array = PackedVector2Array()) -> void:
 	global_position = initial_position
 	target_position = initial_position
@@ -199,6 +215,10 @@ func reset(initial_position: Vector2, new_zone: Rect2, new_polygon: PackedVector
 		&"pistol": true,
 		&"shotgun": false,
 		&"machinegun": false
+	}
+	weapon_charges = {
+		&"shotgun": 0,
+		&"machinegun": 0
 	}
 	fire_cooldown = 0.0
 	frame_time = 0.0
@@ -282,7 +302,7 @@ func shoot_at_position(aim_position: Vector2) -> void:
 
 
 func select_weapon(weapon_name: StringName) -> void:
-	if unlocked_weapons.get(weapon_name, false):
+	if weapon_name == &"pistol" or (unlocked_weapons.get(weapon_name, false) and _weapon_charge_remaining(weapon_name) > 0):
 		current_weapon = weapon_name
 		if is_shooting:
 			_enter_shooting(true)
@@ -389,39 +409,41 @@ func _try_fire_from_animation() -> void:
 func _fire_at_target() -> void:
 	if current_target == null or not is_instance_valid(current_target):
 		return
-	if not _pay_shot_cost():
+	var shot_weapon := current_weapon
+	if not _has_weapon_charge(shot_weapon):
+		_clear_target_after_shot()
+		return
+	var hit_targets := _targets_for_weapon_shot(current_target, shot_weapon)
+	if hit_targets.is_empty():
 		_clear_target_after_shot()
 		return
 
 	fire_cooldown = _current_fire_interval()
 	has_fired_in_fire_cycle = true
-	var impact_position := current_target.global_position
+	var impact_position: Vector2 = (hit_targets[0] as Node2D).global_position
 	var direction := impact_position - global_position
 	if direction.length() > 0.01:
 		last_shot_direction = direction.normalized()
 		_face_shoot_direction(last_shot_direction)
 
 	var muzzle_position := _muzzle_world_position()
-	_spawn_ray(muzzle_position, impact_position, Color(1.0, 0.86, 0.12, 1.0), _current_ray_width(), _muzzle_control_point(impact_position))
+	for target in hit_targets:
+		if not is_instance_valid(target):
+			continue
+		var target_position := target.global_position
+		_spawn_ray(muzzle_position, target_position, Color(1.0, 0.86, 0.12, 1.0), _current_ray_width(), _muzzle_control_point(target_position))
+		shot_fired.emit(muzzle_position, target_position)
+		target.take_damage(_damage_for_weapon(shot_weapon))
+
 	_play_muzzle_flash()
-	shot_fired.emit(muzzle_position, impact_position)
-	current_target.take_damage(_current_damage())
-
-	if current_weapon == &"shotgun":
-		for enemy in get_tree().get_nodes_in_group("enemies"):
-			if enemy == current_target or not is_instance_valid(enemy):
-				continue
-			if enemy.get("alive") == false:
-				continue
-			if enemy.global_position.distance_to(impact_position) <= shotgun_spread_radius:
-				enemy.take_damage(1)
-
 	if current_target == null or not is_instance_valid(current_target) or current_target.get("alive") == false:
 		_clear_target_after_shot()
+	_consume_weapon_charge(shot_weapon, hit_targets.size())
 
 
 func _fire_at_position(aim_position: Vector2) -> void:
-	if not _pay_shot_cost():
+	var shot_weapon := current_weapon
+	if not _has_weapon_charge(shot_weapon):
 		pending_manual_shot = false
 		return
 
@@ -433,23 +455,162 @@ func _fire_at_position(aim_position: Vector2) -> void:
 		last_shot_direction = direction.normalized()
 		_face_shoot_direction(last_shot_direction)
 	var muzzle_position := _muzzle_world_position()
-	_spawn_ray(muzzle_position, aim_position, Color(1.0, 0.86, 0.12, 1.0), _current_ray_width(), _muzzle_control_point(aim_position))
+	var hit_targets := _targets_for_manual_shot(aim_position, shot_weapon)
+	if hit_targets.is_empty():
+		_spawn_ray(muzzle_position, aim_position, Color(1.0, 0.86, 0.12, 1.0), _current_ray_width(), _muzzle_control_point(aim_position))
+		shot_fired.emit(muzzle_position, aim_position)
+	else:
+		for target in hit_targets:
+			if not is_instance_valid(target):
+				continue
+			var target_position := target.global_position
+			_spawn_ray(muzzle_position, target_position, Color(1.0, 0.86, 0.12, 1.0), _current_ray_width(), _muzzle_control_point(target_position))
+			shot_fired.emit(muzzle_position, target_position)
+			target.take_damage(_damage_for_weapon(shot_weapon))
 	_play_muzzle_flash()
-	shot_fired.emit(muzzle_position, aim_position)
+	_consume_weapon_charge(shot_weapon, hit_targets.size())
 
 
-func _pay_shot_cost() -> bool:
-	return true
+func _targets_for_weapon_shot(primary_target: Node2D, weapon: StringName) -> Array[Node2D]:
+	var targets: Array[Node2D] = []
+	if not _is_valid_enemy(primary_target):
+		return targets
+
+	var target_limit := _target_limit_for_weapon(weapon)
+	if target_limit <= 0:
+		return targets
+
+	targets.append(primary_target)
+	if target_limit <= 1:
+		return targets
+
+	var primary_perimeter := _enemy_perimeter_key(primary_target)
+	var candidates: Array[Node2D] = []
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if enemy == primary_target or not _is_valid_enemy(enemy):
+			continue
+		if _enemy_perimeter_key(enemy) != primary_perimeter:
+			continue
+		if global_position.distance_to(enemy.global_position) > _range_for_weapon(weapon):
+			continue
+		candidates.append(enemy)
+
+	candidates.sort_custom(func(a: Node2D, b: Node2D) -> bool:
+		return a.global_position.distance_squared_to(primary_target.global_position) < b.global_position.distance_squared_to(primary_target.global_position)
+	)
+	for candidate in candidates:
+		if targets.size() >= target_limit:
+			break
+		targets.append(candidate)
+	return targets
 
 
-func _current_range() -> float:
-	match current_weapon:
+func _targets_for_manual_shot(aim_position: Vector2, weapon: StringName) -> Array[Node2D]:
+	var targets: Array[Node2D] = []
+	if weapon == &"pistol":
+		return targets
+
+	var target_limit := _target_limit_for_weapon(weapon)
+	if target_limit <= 0:
+		return targets
+
+	var aim_radius := _manual_aim_radius_for_weapon(weapon)
+	var candidates: Array[Node2D] = []
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if not _is_valid_enemy(enemy):
+			continue
+		if global_position.distance_to(enemy.global_position) > _range_for_weapon(weapon):
+			continue
+		if enemy.global_position.distance_to(aim_position) > aim_radius:
+			continue
+		candidates.append(enemy)
+
+	candidates.sort_custom(func(a: Node2D, b: Node2D) -> bool:
+		return a.global_position.distance_squared_to(aim_position) < b.global_position.distance_squared_to(aim_position)
+	)
+	for candidate in candidates:
+		if targets.size() >= target_limit:
+			break
+		targets.append(candidate)
+	return targets
+
+
+func _target_limit_for_weapon(weapon: StringName) -> int:
+	var target_limit := 1
+	match weapon:
+		&"shotgun":
+			target_limit = shotgun_targets_per_shot
+		&"machinegun":
+			target_limit = machinegun_targets_per_shot
+		_:
+			target_limit = 1
+	if weapon != &"pistol":
+		target_limit = mini(target_limit, _weapon_charge_remaining(weapon))
+	return maxi(0, target_limit)
+
+
+func _manual_aim_radius_for_weapon(weapon: StringName) -> float:
+	if weapon == &"machinegun":
+		return shotgun_spread_radius * 1.65
+	return shotgun_spread_radius * 1.25
+
+
+func _is_valid_enemy(enemy: Node2D) -> bool:
+	return is_instance_valid(enemy) and enemy.is_in_group("enemies") and enemy.get("alive") != false
+
+
+func _enemy_perimeter_key(enemy: Node2D) -> bool:
+	return bool(enemy.get("is_mirrored"))
+
+
+func _has_weapon_charge(weapon: StringName) -> bool:
+	if weapon == &"pistol":
+		return true
+	return _weapon_charge_remaining(weapon) > 0
+
+
+func _consume_weapon_charge(weapon: StringName, amount: int = 1) -> void:
+	if weapon == &"pistol":
+		return
+	if amount <= 0:
+		return
+	var remaining: int = max(0, _weapon_charge_remaining(weapon) - amount)
+	weapon_charges[weapon] = remaining
+	if remaining <= 0:
+		unlocked_weapons[weapon] = false
+	weapon_charge_spent.emit(weapon, amount, remaining, _weapon_charge_capacity(weapon))
+
+
+func _weapon_charge_remaining(weapon: StringName) -> int:
+	return int(weapon_charges.get(weapon, 0))
+
+
+func _weapon_charge_capacity(weapon: StringName) -> int:
+	return int(weapon_charge_capacities.get(weapon, 1))
+
+
+func _range_for_weapon(weapon: StringName) -> float:
+	match weapon:
 		&"shotgun":
 			return shotgun_range
 		&"machinegun":
 			return machinegun_range
 		_:
 			return pistol_range
+
+
+func _damage_for_weapon(weapon: StringName) -> int:
+	match weapon:
+		&"shotgun":
+			return shotgun_damage
+		&"machinegun":
+			return machinegun_damage
+		_:
+			return pistol_damage
+
+
+func _current_range() -> float:
+	return _range_for_weapon(current_weapon)
 
 
 func _current_fire_interval() -> float:
@@ -463,13 +624,7 @@ func _current_fire_interval() -> float:
 
 
 func _current_damage() -> int:
-	match current_weapon:
-		&"shotgun":
-			return shotgun_damage
-		&"machinegun":
-			return machinegun_damage
-		_:
-			return pistol_damage
+	return _damage_for_weapon(current_weapon)
 
 
 func _current_ray_width() -> float:

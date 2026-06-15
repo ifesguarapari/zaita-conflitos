@@ -15,14 +15,22 @@ const ENABLED_FILL := Color(1.0, 1.0, 1.0, 0.72)
 const DISABLED_FILL := Color(0.68, 0.68, 0.68, 0.5)
 const BORDER_COLOR := Color(0.0, 0.0, 0.0, 0.92)
 const ACTIVE_BORDER_COLOR := Color(0.42, 0.0, 0.0, 0.95)
+const CHARGE_BAR_SIZE := Vector2(126.0, 14.0)
+const CHARGE_BAR_FILL := Color(1.0, 0.08, 0.12, 0.95)
+const CHARGE_BAR_TRACK := Color(0.0, 0.0, 0.0, 0.24)
 
 @export var shotgun_unlock_cost: int = 10
 @export var machinegun_unlock_cost: int = 30
+@export var shotgun_charge_capacity: int = 10
+@export var machinegun_charge_capacity: int = 30
 @export var shield_cost: int = 20
 @export var turret_cost: int = 40
 
 var hud_root: Control
 var skulls_label: Label
+var weapon_charge_bar: Control
+var weapon_charge_track: Panel
+var weapon_charge_fill: Panel
 var hud_font: Font
 var cards := {}
 var selected_placement: StringName = &""
@@ -32,6 +40,10 @@ var displayed_unlocked_weapons := {
 	&"pistol": true,
 	&"shotgun": false,
 	&"machinegun": false
+}
+var displayed_weapon_charges := {
+	&"shotgun": 0,
+	&"machinegun": 0
 }
 
 
@@ -52,10 +64,11 @@ func _ready() -> void:
 	show_placement_mode(&"")
 
 
-func update_display(skulls: int, current_weapon: StringName, unlocked_weapons: Dictionary) -> void:
+func update_display(skulls: int, current_weapon: StringName, unlocked_weapons: Dictionary, weapon_charges: Dictionary = {}) -> void:
 	displayed_skulls = skulls
 	displayed_weapon = current_weapon
 	displayed_unlocked_weapons = unlocked_weapons.duplicate()
+	displayed_weapon_charges = weapon_charges.duplicate()
 
 	if skulls_label != null:
 		skulls_label.text = str(skulls)
@@ -68,21 +81,22 @@ func update_display(skulls: int, current_weapon: StringName, unlocked_weapons: D
 	_update_card_state(&"pistol", false, current_weapon == &"pistol")
 	_update_card_state(
 		&"shotgun",
-		not bool(unlocked_weapons.get(&"shotgun", false)) and skulls < shotgun_unlock_cost,
-		current_weapon == &"shotgun"
+		not _weapon_has_charge(&"shotgun") and skulls < shotgun_unlock_cost,
+		current_weapon == &"shotgun" and _weapon_has_charge(&"shotgun")
 	)
 	_update_card_state(
 		&"machinegun",
-		not bool(unlocked_weapons.get(&"machinegun", false)) and skulls < machinegun_unlock_cost,
-		current_weapon == &"machinegun"
+		not _weapon_has_charge(&"machinegun") and skulls < machinegun_unlock_cost,
+		current_weapon == &"machinegun" and _weapon_has_charge(&"machinegun")
 	)
 	_update_card_state(&"shield", skulls < shield_cost, selected_placement == &"shield")
 	_update_card_state(&"turret", skulls < turret_cost, selected_placement == &"turret")
+	_update_weapon_charge_bar()
 
 
 func show_placement_mode(item: StringName) -> void:
 	selected_placement = item
-	update_display(displayed_skulls, displayed_weapon, displayed_unlocked_weapons)
+	update_display(displayed_skulls, displayed_weapon, displayed_unlocked_weapons, displayed_weapon_charges)
 
 
 func show_skull_delta(amount: int) -> void:
@@ -114,6 +128,31 @@ func show_skull_delta(amount: int) -> void:
 	tween.chain().tween_callback(delta_label.queue_free)
 
 
+func show_weapon_charge_delta(weapon: StringName, amount: int) -> void:
+	if hud_root == null or amount == 0:
+		return
+
+	var delta_label := Label.new()
+	delta_label.text = "-%d" % abs(amount) if amount < 0 else "+%d" % amount
+	_apply_label_style(delta_label, 32, true)
+	delta_label.add_theme_color_override("font_color", Color(0.85, 0.02, 0.03))
+	delta_label.add_theme_color_override("font_shadow_color", Color(1.0, 0.9, 0.9, 0.78))
+	delta_label.add_theme_constant_override("shadow_offset_x", 2)
+	delta_label.add_theme_constant_override("shadow_offset_y", 2)
+	hud_root.add_child(delta_label)
+
+	var start_position := _weapon_charge_delta_position(weapon)
+	delta_label.position = start_position
+	delta_label.scale = Vector2.ONE * 0.62
+
+	var tween := create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(delta_label, "position", start_position + Vector2(0.0, 42.0), 0.62).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_property(delta_label, "scale", Vector2.ONE * 1.08, 0.24).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_property(delta_label, "modulate:a", 0.0, 0.62).set_delay(0.06)
+	tween.chain().tween_callback(delta_label.queue_free)
+
+
 func update_child_status(_child_name: String, _alive: bool) -> void:
 	pass
 
@@ -139,6 +178,7 @@ func _bind_hud() -> void:
 	_bind_card(&"machinegun", hud_root.get_node("Stack/WeaponsRow/MachinegunCard") as Control, true)
 	_bind_card(&"shield", hud_root.get_node("Stack/ItemsRow/ShieldCard") as Control, false)
 	_bind_card(&"turret", hud_root.get_node("Stack/ItemsRow/TurretCard") as Control, false)
+	_bind_weapon_charge_bar()
 
 
 func _bind_card(card_id: StringName, card: Control, is_weapon: bool) -> void:
@@ -163,6 +203,7 @@ func _bind_card(card_id: StringName, card: Control, is_weapon: bool) -> void:
 		button.pressed.connect(func() -> void: item_requested.emit(card_id))
 
 	cards[card_id] = {
+		"card": card,
 		"background": card.get_node("Background") as Panel,
 		"button": button,
 		"icon": icon,
@@ -188,7 +229,7 @@ func _build_hud() -> void:
 
 	var stack := VBoxContainer.new()
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stack.add_theme_constant_override("separation", 28)
+	stack.add_theme_constant_override("separation", 42)
 	stack.set_anchors_preset(Control.PRESET_FULL_RECT)
 	hud_root.add_child(stack)
 
@@ -210,6 +251,8 @@ func _build_hud() -> void:
 	stack.add_child(items_row)
 	items_row.add_child(_create_card(&"shield", SHIELD_TEXTURE, shield_cost, false))
 	items_row.add_child(_create_card(&"turret", TURRET_TEXTURE, turret_cost, false))
+	hud_root.add_child(_create_weapon_charge_bar())
+	_bind_weapon_charge_bar()
 
 
 func _create_skull_panel() -> Control:
@@ -322,6 +365,7 @@ func _create_card(card_id: StringName, texture: Texture2D, cost: int, is_weapon:
 		button.pressed.connect(func() -> void: item_requested.emit(card_id))
 
 	cards[card_id] = {
+		"card": card,
 		"background": background,
 		"button": button,
 		"icon": icon,
@@ -330,6 +374,49 @@ func _create_card(card_id: StringName, texture: Texture2D, cost: int, is_weapon:
 		"cost": cost
 	}
 	return card
+
+
+func _create_weapon_charge_bar() -> Control:
+	var bar := Control.new()
+	bar.name = "WeaponChargeBar"
+	bar.visible = false
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bar.custom_minimum_size = CHARGE_BAR_SIZE
+	bar.size = CHARGE_BAR_SIZE
+
+	var track := Panel.new()
+	track.name = "Track"
+	track.clip_contents = true
+	track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	track.set_anchors_preset(Control.PRESET_FULL_RECT)
+	track.add_theme_stylebox_override("panel", _make_style(CHARGE_BAR_TRACK, Color.TRANSPARENT, 0, 7))
+	bar.add_child(track)
+
+	var fill := Panel.new()
+	fill.name = "Fill"
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fill.position = Vector2.ZERO
+	fill.size = CHARGE_BAR_SIZE
+	fill.add_theme_stylebox_override("panel", _make_style(CHARGE_BAR_FILL, Color.TRANSPARENT, 0, 7))
+	track.add_child(fill)
+	return bar
+
+
+func _bind_weapon_charge_bar() -> void:
+	weapon_charge_bar = hud_root.get_node_or_null("WeaponChargeBar") as Control
+	if weapon_charge_bar == null:
+		weapon_charge_bar = _create_weapon_charge_bar()
+		hud_root.add_child(weapon_charge_bar)
+	weapon_charge_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	weapon_charge_bar.custom_minimum_size = CHARGE_BAR_SIZE
+	weapon_charge_bar.size = CHARGE_BAR_SIZE
+	weapon_charge_track = weapon_charge_bar.get_node("Track") as Panel
+	weapon_charge_fill = weapon_charge_track.get_node("Fill") as Panel
+	weapon_charge_track.clip_contents = true
+	weapon_charge_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	weapon_charge_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	weapon_charge_track.add_theme_stylebox_override("panel", _make_style(CHARGE_BAR_TRACK, Color.TRANSPARENT, 0, 7))
+	weapon_charge_fill.add_theme_stylebox_override("panel", _make_style(CHARGE_BAR_FILL, Color.TRANSPARENT, 0, 7))
 
 
 func _update_card_state(card_id: StringName, disabled: bool, active: bool) -> void:
@@ -362,6 +449,65 @@ func _set_card_cost(card_id: StringName, cost: int) -> void:
 	data["cost"] = cost
 	var cost_label: Label = data["cost_label"]
 	cost_label.text = str(cost)
+
+
+func _update_weapon_charge_bar() -> void:
+	if weapon_charge_bar == null or weapon_charge_fill == null:
+		return
+
+	if displayed_weapon != &"shotgun" and displayed_weapon != &"machinegun":
+		weapon_charge_bar.visible = false
+		return
+
+	var remaining := _weapon_charge_remaining(displayed_weapon)
+	var capacity := _weapon_charge_capacity(displayed_weapon)
+	if remaining <= 0 or capacity <= 0 or not cards.has(displayed_weapon):
+		weapon_charge_bar.visible = false
+		return
+
+	weapon_charge_bar.visible = true
+	weapon_charge_bar.size = CHARGE_BAR_SIZE
+	weapon_charge_track.size = CHARGE_BAR_SIZE
+	var fill_ratio := clampf(float(remaining) / float(capacity), 0.0, 1.0)
+	weapon_charge_fill.size = Vector2(CHARGE_BAR_SIZE.x * fill_ratio, CHARGE_BAR_SIZE.y)
+
+	var card: Control = cards[displayed_weapon]["card"]
+	var card_size := card.size
+	if card_size.x <= 1.0 or card_size.y <= 1.0:
+		card_size = card.custom_minimum_size
+	var card_origin: Vector2 = hud_root.get_global_transform().affine_inverse() * card.global_position
+	weapon_charge_bar.position = card_origin + Vector2((card_size.x - CHARGE_BAR_SIZE.x) * 0.5, card_size.y + 10.0)
+
+
+func _weapon_charge_delta_position(weapon: StringName) -> Vector2:
+	if weapon_charge_bar != null and weapon_charge_bar.visible:
+		return weapon_charge_bar.position + Vector2(CHARGE_BAR_SIZE.x * 0.5 - 14.0, -20.0)
+	if cards.has(weapon):
+		var card: Control = cards[weapon]["card"]
+		var card_size := card.size
+		if card_size.x <= 1.0 or card_size.y <= 1.0:
+			card_size = card.custom_minimum_size
+		var card_origin: Vector2 = hud_root.get_global_transform().affine_inverse() * card.global_position
+		return card_origin + Vector2(card_size.x * 0.5 - 14.0, card_size.y + 4.0)
+	return Vector2(200.0, 280.0)
+
+
+func _weapon_has_charge(weapon: StringName) -> bool:
+	return _weapon_charge_remaining(weapon) > 0
+
+
+func _weapon_charge_remaining(weapon: StringName) -> int:
+	return int(displayed_weapon_charges.get(weapon, 0))
+
+
+func _weapon_charge_capacity(weapon: StringName) -> int:
+	match weapon:
+		&"shotgun":
+			return shotgun_charge_capacity
+		&"machinegun":
+			return machinegun_charge_capacity
+		_:
+			return 1
 
 
 func _make_style(fill: Color, border: Color, border_width: int, radius: int) -> StyleBoxFlat:

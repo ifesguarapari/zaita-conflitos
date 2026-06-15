@@ -19,7 +19,7 @@ func show_popup(child_name: String = "") -> void:
 	title_label.text = "%s foi atingida" % displayed_name
 	description_label.text = (
 		"O tiro interrompe a procura pela figurinha-flor e deixa o beco em silêncio. "
-		+ "Benícia, a mãe, e a irmã que fica carregam a dor de quem só queria ver as meninas voltarem para casa. "
+		+ "Benícia, a mãe, e a irmã carregam a dor de quem só queria ver as meninas voltarem para casa. "
 		+ "A frase final pesa como memória e culpa: \"Zaíta, você esqueceu de guardar os brinquedos\". "
 		+ "Tente de novo: mova o irmão, mire nos inimigos e proteja Zaíta e Naíta até o fim."
 	)

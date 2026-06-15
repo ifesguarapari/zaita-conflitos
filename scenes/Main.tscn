@@ -10,8 +10,8 @@
 [ext_resource type="PackedScene" path="res://scenes/AutoTurret.tscn" id="8"]
 [ext_resource type="PackedScene" path="res://scenes/ProjectileRay.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://scenes/HUD.tscn" id="10"]
-[ext_resource type="PackedScene" path="res://scenes/StartPopup.tscn" id="11"]
-[ext_resource type="PackedScene" path="res://scenes/GameOverPopup.tscn" id="12"]
+[ext_resource type="PackedScene" uid="uid://clc4m2f1s5hgo" path="res://scenes/StartPopup.tscn" id="11"]
+[ext_resource type="PackedScene" uid="uid://donxggntrssl0" path="res://scenes/GameOverPopup.tscn" id="12"]
 [ext_resource type="Shader" uid="uid://bdbako6lat2to" path="res://shaders/sewer_flow.gdshader" id="13"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_sewer"]
@@ -33,6 +33,7 @@ z_index = -100
 
 [node name="BackgroundDistant" type="Sprite2D" parent="Backgrounds" unique_id=822740472]
 modulate = Color(0.54, 0.54, 0.54, 1)
+position = Vector2(0, -282)
 texture = ExtResource("2")
 centered = false
 
