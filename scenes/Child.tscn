@@ -1,0 +1,45 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/Child.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/zaita-walking-front-left.png" id="2"]
+[ext_resource type="Texture2D" path="res://assets/sprites/zaita-walking-back-right.png" id="3"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_child"]
+radius = 19.0
+
+[node name="Child" type="Node2D"]
+script = ExtResource("1")
+speed = 18.0
+down_frame_size = Vector2i(312, 596)
+up_frame_size = Vector2i(230, 640)
+sheet_columns = 6
+frame_count = 36
+down_sprite_scale = 0.137
+up_sprite_scale = 0.127
+
+[node name="FootShadow" type="Polygon2D" parent="."]
+z_index = -2
+color = Color(0, 0, 0, 0.24)
+polygon = PackedVector2Array(-20, -3, -14, -6, 0, -7, 14, -6, 20, -3, 14, 3, 0, 5, -14, 3)
+
+[node name="Sprites" type="Node2D" parent="."]
+
+[node name="DownSprite" type="Sprite2D" parent="Sprites"]
+texture = ExtResource("2")
+region_enabled = true
+region_rect = Rect2(0, 0, 312, 596)
+offset = Vector2(0, -298)
+scale = Vector2(0.137, 0.137)
+
+[node name="UpSprite" type="Sprite2D" parent="Sprites"]
+modulate = Color(1, 1, 1, 0)
+texture = ExtResource("3")
+region_enabled = true
+region_rect = Rect2(0, 0, 230, 640)
+offset = Vector2(0, -320)
+scale = Vector2(0.127, 0.127)
+
+[node name="CareArea" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="CareArea"]
+shape = SubResource("CircleShape2D_child")

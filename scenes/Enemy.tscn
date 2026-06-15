@@ -1,0 +1,37 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/Enemy.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/enemy-starting-back-right.png" id="2"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_enemy"]
+radius = 24.0
+
+[node name="Enemy" type="Node2D"]
+script = ExtResource("1")
+speed = 42.0
+
+[node name="FootShadow" type="Polygon2D" parent="."]
+z_index = -2
+color = Color(0, 0, 0, 0.24)
+polygon = PackedVector2Array(-24, -3, -18, -7, 0, -9, 18, -7, 24, -3, 18, 3, 0, 5, -18, 3)
+
+[node name="Sprites" type="Node2D" parent="."]
+
+[node name="BodySprite" type="Sprite2D" parent="Sprites"]
+texture_filter = 3
+texture = ExtResource("2")
+region_enabled = true
+region_rect = Rect2(0, 0, 600, 640)
+offset = Vector2(0, -320)
+scale = Vector2(0.205, 0.205)
+
+[node name="MuzzleFlash" type="Polygon2D" parent="."]
+visible = false
+z_index = 6
+color = Color(1, 0.78, 0.18, 0.9)
+polygon = PackedVector2Array(0, -3, 18, 0, 0, 3, 4, 0)
+
+[node name="ClickArea" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ClickArea"]
+shape = SubResource("CircleShape2D_enemy")

@@ -1,0 +1,37 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/AutoTurret.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/props/rotarygun-shooting.png" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/ProjectileRay.tscn" id="3"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_turret"]
+radius = 34.0
+
+[node name="AutoTurret" type="Node2D"]
+z_index = 30
+script = ExtResource("1")
+attack_range = 560.0
+shoot_interval = 0.125
+cost_per_shot = 0
+duration_seconds = 5.0
+ammo_limit = 40
+ray_scene = ExtResource("3")
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture_filter = 3
+texture = ExtResource("2")
+region_enabled = true
+region_rect = Rect2(0, 0, 640, 606)
+offset = Vector2(0, -303)
+scale = Vector2(0.14, 0.14)
+
+[node name="MuzzleFlash" type="Polygon2D" parent="."]
+visible = false
+z_index = 6
+color = Color(1, 0.82, 0.18, 0.92)
+polygon = PackedVector2Array(0, -3, 18, 0, 0, 3, 4, 0)
+
+[node name="BaseArea" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BaseArea"]
+shape = SubResource("CircleShape2D_turret")

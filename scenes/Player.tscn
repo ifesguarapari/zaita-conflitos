@@ -1,0 +1,64 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/Player.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/sprites/brother-walking-front-right.png" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/ProjectileRay.tscn" id="3"]
+[ext_resource type="Texture2D" path="res://assets/sprites/brother-walking-back-left.png" id="4"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_player"]
+radius = 24.0
+
+[node name="Player" type="Node2D"]
+script = ExtResource("1")
+speed = 16.0
+pistol_range = 900.0
+shotgun_range = 650.0
+machinegun_range = 1100.0
+ray_scene = ExtResource("3")
+down_frame_size = Vector2i(310, 636)
+up_frame_size = Vector2i(250, 640)
+sheet_columns = 6
+frame_count = 36
+
+[node name="FootShadow" type="Polygon2D" parent="."]
+z_index = -2
+color = Color(0, 0, 0, 0.24)
+polygon = PackedVector2Array(-24, -3, -18, -7, 0, -9, 18, -7, 24, -3, 18, 3, 0, 5, -18, 3)
+
+[node name="Sprites" type="Node2D" parent="."]
+
+[node name="DownSprite" type="Sprite2D" parent="Sprites"]
+texture = ExtResource("2")
+region_enabled = true
+region_rect = Rect2(0, 0, 310, 636)
+offset = Vector2(0, -318)
+scale = Vector2(0.16, 0.16)
+
+[node name="UpSprite" type="Sprite2D" parent="Sprites"]
+modulate = Color(1, 1, 1, 0)
+texture = ExtResource("4")
+region_enabled = true
+region_rect = Rect2(0, 0, 250, 640)
+offset = Vector2(0, -320)
+scale = Vector2(0.16, 0.16)
+
+[node name="ShootSprite" type="Sprite2D" parent="Sprites"]
+modulate = Color(1, 1, 1, 0)
+region_enabled = true
+region_rect = Rect2(0, 0, 612, 550)
+offset = Vector2(0, -275)
+scale = Vector2(0.185, 0.185)
+
+[node name="MuzzlePoint" type="Marker2D" parent="."]
+position = Vector2(44, -62)
+
+[node name="MuzzleFlash" type="Polygon2D" parent="."]
+visible = false
+z_index = 6
+color = Color(1, 0.88, 0.18, 0.85)
+polygon = PackedVector2Array(0, -3, 16, 0, 0, 3, 4, 0)
+
+[node name="PresenceArea" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PresenceArea"]
+shape = SubResource("CircleShape2D_player")

@@ -1,0 +1,24 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/Shield.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/props/shield.png" id="2"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_shield"]
+radius = 38.0
+
+[node name="Shield" type="Node2D"]
+z_index = 30
+script = ExtResource("1")
+max_health = 20
+block_radius = 38.0
+
+[node name="Sprite" type="Sprite2D" parent="."]
+texture_filter = 3
+texture = ExtResource("2")
+offset = Vector2(0, -356)
+scale = Vector2(0.14, 0.14)
+
+[node name="BlockArea" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BlockArea"]
+shape = SubResource("CircleShape2D_shield")
